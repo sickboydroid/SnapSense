@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://www.example.com/snapsense">
+  <a href="https://github.com/sickboydroid/SnapSense/releases/download/V1/SnapSense.exe">
     <img src="assets/icon.svg" alt="SnapSense" width="160" height="160" />
   </a>
 </p>
@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://www.example.com/snapsense">Website</a>
   &nbsp;·&nbsp;
-  <a href="https://www.example.com/snapsense/icon">Icon &amp; brand</a>
+  <a href="https://github.com/sickboydroid/SnapSense/releases/download/V1/SnapSense.exe">Download EXE Now!!</a>
 </p>
 
 ---
