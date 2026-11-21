@@ -21,8 +21,8 @@ function mapMouse(e) {
   const sx = bg.width / rect.width;
   const sy = bg.height / rect.height;
   return {
-    x: (e.clientX - rect.left) * sx,
-    y: (e.clientY - rect.top) * sy
+    x: Math.max(0, Math.min(bg.width, (e.clientX - rect.left) * sx)),
+    y: Math.max(0, Math.min(bg.height, (e.clientY - rect.top) * sy))
   };
 }
 
@@ -51,7 +51,10 @@ function drawSelection() {
   ctxSel.clearRect(rx, ry, rw, rh);
   ctxSel.strokeStyle = 'rgba(138, 180, 255, 0.95)';
   ctxSel.lineWidth = 2;
+  ctxSel.shadowColor = 'rgba(100, 149, 255, 0.7)';
+  ctxSel.shadowBlur = 12;
   ctxSel.strokeRect(rx + 0.5, ry + 0.5, Math.max(0, rw - 1), Math.max(0, rh - 1));
+  ctxSel.shadowBlur = 0;
 }
 
 async function getDesktopStream() {
@@ -91,38 +94,35 @@ async function getDesktopStream() {
 
 async function freezeFrame() {
   let stream;
+  let video;
   try {
     stream = await getDesktopStream();
-  } catch (e) {
-    console.error('[SnapSense capture] getUserMedia failed', e);
+    video = document.createElement('video');
+    video.srcObject = stream;
+    video.muted = true;
+    await video.play();
+    if (video.readyState < 2) {
+      await new Promise((resolve) => video.addEventListener('loadeddata', resolve, { once: true }));
+    }
+    const { videoWidth: width, videoHeight: height } = video;
+    if (width < 2 || height < 2) throw new Error('Invalid screen dimensions');
+
+    // Keep the stream's native resolution so the cropped image remains sharp.
+    bg.width = width;
+    bg.height = height;
+    ctxBg.imageSmoothingEnabled = true;
+    ctxBg.imageSmoothingQuality = 'high';
+    ctxBg.drawImage(video, 0, 0, width, height);
+    ready = true;
+    drawSelection();
+    window.snapsense.sendCaptureReady();
+  } catch (error) {
+    console.error('[SnapSense capture] Could not freeze screen', error);
     window.snapsense.sendCaptureCancel();
-    return;
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+    if (video) video.srcObject = null;
   }
-  const video = document.createElement('video');
-  video.srcObject = stream;
-  video.muted = true;
-  await video.play();
-  await new Promise((r) => {
-    if (video.readyState >= 2) r();
-    else video.addEventListener('loadeddata', r, { once: true });
-  });
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  if (vw < 2 || vh < 2) {
-    console.error('[SnapSense capture] Invalid video dimensions', vw, vh);
-    window.snapsense.sendCaptureCancel();
-    return;
-  }
-  /* Native stream resolution — avoids blur from scaling; CSS stretches canvas to fill the overlay */
-  bg.width = vw;
-  bg.height = vh;
-  ctxBg.imageSmoothingEnabled = true;
-  ctxBg.imageSmoothingQuality = 'high';
-  ctxBg.drawImage(video, 0, 0, vw, vh);
-  stream.getTracks().forEach((t) => t.stop());
-  video.srcObject = null;
-  ready = true;
-  drawSelection();
 }
 
 function cropSelection() {
@@ -148,7 +148,7 @@ function cropSelection() {
 }
 
 function onDown(e) {
-  if (!ready) return;
+  if (!ready || e.button !== 0) return;
   dragging = true;
   const p = mapMouse(e);
   startX = p.x;
@@ -166,8 +166,11 @@ function onMove(e) {
   drawSelection();
 }
 
-function onUp() {
+function onUp(e) {
   if (!dragging) return;
+  const p = mapMouse(e);
+  curX = p.x;
+  curY = p.y;
   dragging = false;
   const dataUrl = cropSelection();
   drawSelection();
@@ -213,28 +216,3 @@ const unsub = window.snapsense.onCaptureInit((payload) => {
 window.addEventListener('beforeunload', () => {
   if (typeof unsub === 'function') unsub();
 });
-// feat: basic screenshot capture flow @ 12:48:00
-// feat: add selection rectangle drag logic @ 13:05:00
-// fix: fullscreen capture (taskbar issue) @ 13:22:00
-// ui: improve selection overlay visuals @ 14:05:00
-// fix: crash on rescreenshot @ 16:35:00
-// feat: basic screenshot capture flow @ 12:48:00
-// feat: add selection rectangle drag logic @ 13:05:00
-// fix: fullscreen capture (taskbar issue) @ 13:22:00
-// ui: improve selection overlay visuals @ 14:05:00
-// fix: crash on rescreenshot @ 16:35:00
-// feat: basic screenshot capture flow @ 12:47:00
-// feat: selection rectangle drag logic @ 13:03:00
-// fix: fullscreen capture (taskbar overlap) @ 13:21:00
-// ui: improve overlay + blur feel @ 14:04:00
-// fix: crash on rescreenshot during active flow @ 16:33:00
-// feat: basic screenshot capture flow @ 12:47:00
-// feat: selection rectangle drag logic @ 13:03:00
-// fix: fullscreen capture (taskbar overlap) @ 13:21:00
-// ui: improve overlay + blur feel @ 14:04:00
-// fix: crash on rescreenshot during active flow @ 16:33:00
-// feat: basic screenshot capture flow @ 12:47:00
-// feat: selection rectangle drag logic @ 13:03:00
-// fix: fullscreen capture (taskbar overlap) @ 13:21:00
-// ui: improve overlay + blur feel @ 14:04:00
-// fix: crash on rescreenshot during active flow @ 16:33:00

@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('snapsense', {
   },
   sendCaptureResult: (payload) => ipcRenderer.send('capture-result', payload),
   sendCaptureCancel: () => ipcRenderer.send('capture-cancel'),
+  sendCaptureReady: () => ipcRenderer.send('capture-ready'),
 
   onModeStripInit: (fn) => {
     const handler = (_, payload) => fn(payload);
@@ -47,8 +48,9 @@ contextBridge.exposeInMainWorld('snapsense', {
   getApiKeyStatus: () => ipcRenderer.invoke('get-api-key-status'),
   getModelMode: () => ipcRenderer.invoke('get-model-mode'),
   setModelMode: (mode) => ipcRenderer.invoke('set-model-mode', { mode }),
-  setOpenAiApiKey: (token) => ipcRenderer.invoke('set-openai-api-key', { token }),
-  setOpenAiModel: (model) => ipcRenderer.invoke('set-openai-model', { model }),
+  saveModelConfig: (config) => ipcRenderer.invoke('save-model-config', config),
+  setProviderApiKey: (provider, token) => ipcRenderer.invoke('set-provider-api-key', { provider, token }),
+  listModels: (options) => ipcRenderer.invoke('list-models', options),
   closePanel: () => ipcRenderer.send('panel-close'),
 
   requestFollowUpCapture: () => {

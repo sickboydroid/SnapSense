@@ -1,20 +1,21 @@
 {
   "name": "snapsense",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "SnapSense — tray screenshot + AI overlay",
   "author": "SnapSense",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "pack": "node scripts/bake-key-for-dist.js && electron-builder --dir",
-    "dist": "node scripts/bake-key-for-dist.js && electron-builder",
-    "dist:win": "node scripts/bake-key-for-dist.js && electron-builder --win nsis --x64",
-    "dist:linux": "node scripts/bake-key-for-dist.js && electron-builder --linux AppImage",
-    "dist:mac": "node scripts/bake-key-for-dist.js && electron-builder --mac dmg",
-    "dist:win:local": "node scripts/bake-key-for-dist.js && electron-builder --win nsis --x64 --publish never",
-    "dist:linux:local": "node scripts/bake-key-for-dist.js && electron-builder --linux AppImage --publish never",
-    "dist:mac:local": "node scripts/bake-key-for-dist.js && electron-builder --mac dmg --publish never"
+    "test": "node --test test/model-settings.test.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:win:local": "electron-builder --win nsis --x64 --publish never",
+    "dist:linux:local": "electron-builder --linux AppImage --publish never",
+    "dist:mac:local": "electron-builder --mac dmg --publish never"
   },
   "build": {
     "publish": {
@@ -33,7 +34,9 @@
     },
     "files": [
       "src/**/*",
+      "!src/baked-groq-key.js",
       "assets/**/*",
+      "config/**/*",
       "package.json"
     ],
     "win": {

@@ -47,11 +47,11 @@ function Shimmer({ className = '' }) {
 
 export function HeroDownloadButton({ githubUrl }) {
   const { os, assets, loading, releasesUrl } = useDownload()
-  const [dropdownOpen, setDropdownOpen] = useState(false)
 
   const primary = assets?.[os]
   const OsIcon = OS_ICONS[os] ?? WindowsIcon
   const others = OTHER_PLATFORMS[os] ?? ['windows', 'linux']
+  const availableOthers = loading ? others : others.filter((platform) => assets?.[platform])
 
   const href = primary?.url ?? releasesUrl
 
@@ -76,7 +76,7 @@ export function HeroDownloadButton({ githubUrl }) {
             </>
           ) : (
             <>
-              <span>Download for {OS_CONFIGS[os]?.label ?? 'Windows'}</span>
+              <span>{primary ? `Download for ${OS_CONFIGS[os]?.label ?? 'Windows'}` : 'Browse releases'}</span>
               {primary?.size && (
                 <span className="rounded-md bg-blue-400/30 px-1.5 py-0.5 text-[11px] font-medium text-blue-100 tabular-nums">
                   {primary.size}
@@ -101,9 +101,9 @@ export function HeroDownloadButton({ githubUrl }) {
       </div>
 
       {/* ── other platforms row ── */}
-      <div className="flex items-center gap-1.5 text-[12px] text-neutral-600">
+      {availableOthers.length > 0 && <div className="flex items-center gap-1.5 text-[12px] text-neutral-600">
         <span>Also available for</span>
-        {others.map((platform, i) => {
+        {availableOthers.map((platform, i) => {
           const asset = assets?.[platform]
           const Icon = OS_ICONS[platform]
           const label = OS_CONFIGS[platform]?.label ?? platform
@@ -127,16 +127,8 @@ export function HeroDownloadButton({ githubUrl }) {
             </span>
           )
         })}
-        <span className="text-neutral-700">·</span>
-        <a
-          href={releasesUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-neutral-600 transition-colors hover:text-neutral-400"
-        >
-          All releases ↗
-        </a>
       </div>
+      }
     </div>
   )
 }
@@ -172,7 +164,7 @@ export function NavDownloadButton() {
           ) : (
             <>
               <OsIcon className="h-3.5 w-3.5 shrink-0" />
-              <span>Download</span>
+              <span>{primary ? 'Download' : 'Releases'}</span>
             </>
           )}
         </motion.a>
@@ -206,7 +198,7 @@ export function NavDownloadButton() {
             className="absolute right-0 top-[calc(100%+8px)] z-50 min-w-[170px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 py-1 px-3 shadow-xl shadow-black/40"
           >
             {/* current OS first */}
-            {[os, ...others].map((platform) => {
+            {[os, ...others.filter((platform) => loading || assets?.[platform])].map((platform) => {
               const asset = assets?.[platform]
               const Icon = OS_ICONS[platform]
               const label = OS_CONFIGS[platform]?.label ?? platform

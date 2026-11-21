@@ -49,6 +49,14 @@
         border-radius: 8px;
         padding: 8px 14px;
         pointer-events: none;
+        animation: hint-enter 220ms ease-out both;
+      }
+      @keyframes hint-enter {
+        from { opacity: 0; transform: translate(-50%, 8px); }
+        to { opacity: 1; transform: translate(-50%, 0); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #hint { animation-duration: 0.01ms; }
       }
     </style>
   </head>

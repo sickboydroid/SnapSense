@@ -45,7 +45,7 @@ export default function Hero() {
 
             {/* ── Announcement badge ── */}
             <motion.a
-              href="https://github.com/hellofaizan/SnapSense/releases/latest"
+              href="https://github.com/sickboydroid/SnapSense/releases/latest"
               target="_blank"
               rel="noopener noreferrer"
               initial={{ opacity: 0, y: -10 }}
@@ -57,7 +57,7 @@ export default function Hero() {
             >
               <Sparkles className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
               <ShinyText
-                text="v0.1.2 — Now on Windows, macOS & Linux"
+                text="v0.1.4 — Now on Windows, macOS & Linux"
                 speed={4}
                 className="text-blue-300"
               />

@@ -33,12 +33,24 @@
               height="14"
               alt=""
             />
-            <span class="model-select-label">Model</span>
-            <select id="ai-model-mode" aria-label="AI model">
+            <span class="model-select-label">Provider</span>
+            <select id="ai-model-mode" aria-label="AI provider">
               <option value="groq">Groq</option>
               <option value="openai">OpenAI</option>
+              <option value="custom">Custom API</option>
             </select>
           </label>
+          <button
+            type="button"
+            id="model-settings-toggle"
+            class="icon-btn ghost"
+            aria-label="Configure model"
+            aria-expanded="false"
+            aria-controls="model-settings"
+            title="Configure model"
+          >
+            <img class="img-ico" src="../../assets/icons/model-sliders.svg" width="16" height="16" alt="" />
+          </button>
           <button
             type="button"
             id="stealth-toggle"
@@ -59,30 +71,35 @@
           </button>
         </div>
       </header>
-      <div id="openai-key-bar" class="openai-key-bar" hidden>
-        <div class="openai-key-row">
-          <label class="openai-key-label" for="openai-api-key">OpenAI API key</label>
-          <input
-            type="password"
-            id="openai-api-key"
-            class="openai-key-input"
-            placeholder="sk-…"
-            spellcheck="false"
-            autocomplete="off"
-          />
-          <input
-            type="text"
-            id="openai-model-id"
-            class="openai-model-input"
-            placeholder="Model (e.g. gpt-4o-mini)"
-            spellcheck="false"
-            autocomplete="off"
-            title="Vision-capable models work with screenshots"
-          />
-          <button type="button" id="openai-key-save" class="openai-key-save">Save</button>
+      <section id="model-settings" class="model-settings" aria-label="Model settings" hidden>
+        <div class="model-settings-row">
+          <label class="model-settings-field model-settings-grow" for="model-catalog">
+            Available models
+            <select id="model-catalog">
+              <option value="">Load models from this provider</option>
+            </select>
+          </label>
+          <button type="button" id="model-list-load" class="model-settings-secondary">Load list</button>
         </div>
-        <span class="openai-key-hint">Stored encrypted with the OS (DPAPI on Windows). Use a vision-capable model for screenshots.</span>
-      </div>
+        <label class="model-settings-field" for="model-id">
+          Model ID
+          <input id="model-id" type="text" placeholder="Enter a vision-capable model ID" spellcheck="false" autocomplete="off" />
+        </label>
+        <label id="custom-base-url-field" class="model-settings-field" for="custom-base-url" hidden>
+          OpenAI-compatible base URL
+          <input id="custom-base-url" type="url" placeholder="http://localhost:1234/v1" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="model-settings-field" for="provider-api-key">
+          <span id="provider-key-label">Groq API key</span>
+          <input id="provider-api-key" type="password" placeholder="Leave blank to keep the current key" spellcheck="false" autocomplete="off" />
+        </label>
+        <div class="model-settings-actions">
+          <button type="button" id="model-settings-save" class="model-settings-primary">Save model</button>
+          <button type="button" id="model-key-clear" class="model-settings-secondary">Forget saved key</button>
+        </div>
+        <p class="model-settings-hint">Choose from the provider list or enter an ID. Screenshot analysis needs a model that accepts images. Custom APIs can run locally without a key.</p>
+        <p id="model-settings-status" class="model-settings-status" role="status" aria-live="polite"></p>
+      </section>
       <div id="banner" class="banner"></div>
       <div class="panel-body" id="section-ai">
         <div class="chat-area">
@@ -177,6 +194,7 @@
           <p class="text-chat-meta" id="text-status"></p>
           <div id="text-loading" class="text-loading-host" hidden></div>
           <div id="text-error" class="bubble assistant error text-extract-err" hidden></div>
+          <button type="button" id="text-retry" class="model-settings-secondary text-retry" hidden>Try again</button>
           <div id="text-result" class="text-result-wrap" hidden>
             <div class="bubble assistant">
               <div class="bubble-body text-extract-body">

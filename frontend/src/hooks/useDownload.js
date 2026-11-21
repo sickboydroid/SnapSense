@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-const REPO = 'hellofaizan/SnapSense'
+const REPO = 'sickboydroid/SnapSense'
 
 /**
  * Recognise the visitor's OS from the browser user-agent.

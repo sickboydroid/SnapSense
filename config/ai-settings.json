@@ -1,5 +1,8 @@
 {
   "modelMode": "groq",
+  "groqModel": "qwen/qwen3.8-27b",
   "openaiModel": "gpt-4o-mini",
+  "customModel": "",
+  "customBaseUrl": "",
   "stealthMode": false
 }

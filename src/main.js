@@ -22,14 +22,14 @@ const {
   getAiKeyStatus,
   getPrompt,
   requestAi,
-  getModelMode,
   setModelMode,
-  getOpenAiModel,
-  setOpenAiModel,
+  getModelSettings,
+  setModelConfig,
+  listAvailableModels,
   getStealthMode,
   setStealthMode
 } = require('./aiClient');
-const { setOpenAiApiKey } = require('./secureCredentials');
+const { setProviderApiKey } = require('./secureCredentials');
 
 const CAPTURE_PRELOAD = path.join(__dirname, 'preload.js');
 const PANEL_PRELOAD = path.join(__dirname, 'preload.js');
@@ -113,6 +113,8 @@ let tray = null;
 let captureWin = null;
 let modeStripWin = null;
 let panelWin = null;
+let captureFrameReady = false;
+let modeStripReady = false;
 /** Whether stealth mode is currently active. */
 let stealthActive = false;
 /** Mode chosen in floating strip during active capture */
@@ -144,7 +146,7 @@ function registerCaptureEscapeShortcut() {
   const ok = globalShortcut.register('Escape', () => {
     if (!captureWin || captureWin.isDestroyed()) return;
     log.info('main', 'Escape — cancel capture');
-    destroyCaptureWindow();
+    cancelCaptureFlow();
   });
   captureEscapeShortcutRegistered = Boolean(ok);
   if (!ok) {
@@ -786,6 +788,19 @@ function destroyCaptureWindow() {
     captureWin.close();
   }
   captureWin = null;
+  captureFrameReady = false;
+  modeStripReady = false;
+}
+
+function cancelCaptureFlow() {
+  ++captureFlowGeneration;
+  const restorePanel = followUpCapturePending;
+  followUpCapturePending = false;
+  destroyCaptureWindow();
+  if (restorePanel && panelWin && !panelWin.isDestroyed()) {
+    panelWin.show();
+    panelWin.focus();
+  }
 }
 
 function createModeStripWindow() {
@@ -797,7 +812,7 @@ function createModeStripWindow() {
   const x = Math.round(d.bounds.x + (d.bounds.width - STRIP_W) / 2);
   const y = Math.round(d.bounds.y + margin);
 
-  modeStripWin = new BrowserWindow({
+  const win = new BrowserWindow({
     x,
     y,
     width: STRIP_W,
@@ -818,28 +833,29 @@ function createModeStripWindow() {
       sandbox: false
     }
   });
+  modeStripWin = win;
 
-  modeStripWin.setAlwaysOnTop(true, 'pop-up-menu');
-  modeStripWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setAlwaysOnTop(true, 'pop-up-menu');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  modeStripWin
+  win
     .loadFile(MODE_STRIP_HTML)
     .catch((e) => log.error('main', 'loadFile mode strip', e));
 
-  modeStripWin.once('ready-to-show', () => {
-    if (!modeStripWin.isDestroyed()) {
-      modeStripWin.show();
+  win.once('ready-to-show', () => {
+    if (modeStripWin !== win) return;
+    modeStripReady = true;
+    if (captureFrameReady && !win.isDestroyed()) win.show();
+  });
+
+  win.webContents.once('did-finish-load', () => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('mode-strip-init', { defaultMode: captureSessionMode });
     }
   });
 
-  modeStripWin.webContents.once('did-finish-load', () => {
-    if (!modeStripWin.isDestroyed()) {
-      modeStripWin.webContents.send('mode-strip-init', { defaultMode: captureSessionMode });
-    }
-  });
-
-  modeStripWin.on('closed', () => {
-    modeStripWin = null;
+  win.on('closed', () => {
+    if (modeStripWin === win) modeStripWin = null;
   });
 
   log.info('main', 'Mode strip created', { x, y, STRIP_W, STRIP_H });
@@ -857,7 +873,7 @@ function createCaptureWindow(sourceId) {
   const display = screen.getPrimaryDisplay();
   const { x, y, width, height } = display.bounds;
 
-  captureWin = new BrowserWindow({
+  const win = new BrowserWindow({
     x,
     y,
     width,
@@ -878,30 +894,31 @@ function createCaptureWindow(sourceId) {
       sandbox: false
     }
   });
+  captureWin = win;
 
-  captureWin.setAlwaysOnTop(true, 'screen-saver');
-  captureWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  captureWin.setBounds(display.bounds);
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setBounds(display.bounds);
 
-  captureWin.loadFile(CAPTURE_HTML).catch((e) => log.error('main', 'loadFile capture', e));
+  win.loadFile(CAPTURE_HTML).catch((e) => log.error('main', 'loadFile capture', e));
 
-  captureWin.once('ready-to-show', () => {
-    if (!captureWin.isDestroyed()) {
-      captureWin.setBounds(display.bounds);
-      captureWin.show();
-      captureWin.focus();
-      captureWin.setBounds(display.bounds);
+  win.once('ready-to-show', () => {
+    if (captureWin === win && !win.isDestroyed()) {
+      win.setBounds(display.bounds);
+      win.show();
+      win.focus();
+      win.setBounds(display.bounds);
     }
   });
 
-  captureWin.webContents.once('did-finish-load', () => {
-    if (!captureWin.isDestroyed()) {
-      captureWin.webContents.send('capture-init', { sourceId });
+  win.webContents.once('did-finish-load', () => {
+    if (captureWin === win && !win.isDestroyed()) {
+      win.webContents.send('capture-init', { sourceId });
     }
   });
 
-  captureWin.on('closed', () => {
-    captureWin = null;
+  win.on('closed', () => {
+    if (captureWin === win) captureWin = null;
   });
 
   log.info('main', 'Capture window created', { bounds: display.bounds });
@@ -971,7 +988,7 @@ function createPanelWindow(payload) {
   const py = y + margin;
 
   const panelIcon = appIconPath();
-  panelWin = new BrowserWindow({
+  const win = new BrowserWindow({
     x: px,
     y: py,
     width: panelWidth,
@@ -993,48 +1010,50 @@ function createPanelWindow(payload) {
       webviewTag: true
     }
   });
+  panelWin = win;
 
-  panelWin.loadFile(PANEL_HTML).catch((e) => log.error('main', 'loadFile panel', e));
+  win.loadFile(PANEL_HTML).catch((e) => log.error('main', 'loadFile panel', e));
 
-  panelWin.webContents.once('did-finish-load', () => {
-    if (!panelWin.isDestroyed()) {
+  win.webContents.once('did-finish-load', () => {
+    if (panelWin === win && !win.isDestroyed()) {
       setImmediate(() => {
-        if (!panelWin.isDestroyed()) {
-          panelWin.webContents.send('panel-open', payload);
+        if (panelWin === win && !win.isDestroyed()) {
+          win.webContents.send('panel-open', payload);
         }
       });
     }
   });
 
-  panelWin.once('ready-to-show', () => {
-    panelWin.show();
-    panelWin.focus();
+  win.once('ready-to-show', () => {
+    if (panelWin !== win || win.isDestroyed()) return;
+    win.show();
+    win.focus();
   });
 
-  panelWin.on('focus', () => {
+  win.on('focus', () => {
     // Re-apply content protection on every focus gain — Electron resets it after hide/show cycles
     // (see https://github.com/electron/electron/issues/45844).
-    if (stealthActive && panelWin && !panelWin.isDestroyed()) {
+    if (stealthActive && !win.isDestroyed()) {
       try {
-        panelWin.setContentProtection(true);
+        win.setContentProtection(true);
       } catch {
         /* ignore */
       }
     }
   });
 
-  panelWin.on('closed', () => {
-    panelWin = null;
+  win.on('closed', () => {
+    if (panelWin === win) panelWin = null;
   });
 
   // Restore persisted stealth preference on each new panel window.
   stealthActive = getStealthMode();
   if (stealthActive) {
     setImmediate(() => {
-      if (panelWin && !panelWin.isDestroyed()) {
+      if (panelWin === win && !win.isDestroyed()) {
         try {
-          panelWin.setContentProtection(true);
-          panelWin.setSkipTaskbar(true);
+          win.setContentProtection(true);
+          win.setSkipTaskbar(true);
         } catch {
           /* ignore */
         }
@@ -1042,7 +1061,7 @@ function createPanelWindow(payload) {
           try { tray.destroy(); } catch { /* ignore */ }
           tray = null;
         }
-        panelWin.webContents.send('stealth-mode-changed', { enabled: true });
+        win.webContents.send('stealth-mode-changed', { enabled: true });
       }
     });
   }
@@ -1258,6 +1277,14 @@ function buildTray() {
 }
 
 function setupIpc() {
+  ipcMain.on('capture-ready', (event) => {
+    if (!captureWin || captureWin.isDestroyed() || event.sender !== captureWin.webContents) return;
+    captureFrameReady = true;
+    if (modeStripReady && modeStripWin && !modeStripWin.isDestroyed()) {
+      modeStripWin.show();
+    }
+  });
+
   ipcMain.on('capture-mode-selected', (_evt, mode) => {
     if (mode === 'ai' || mode === 'text' || mode === 'lens' || mode === 'ocr') {
       captureSessionMode = mode === 'ocr' ? 'text' : mode;
@@ -1269,16 +1296,27 @@ function setupIpc() {
     return getAiKeyStatus();
   });
 
-  ipcMain.handle('get-model-mode', () => ({
-    mode: getModelMode(),
-    openaiModel: getOpenAiModel()
-  }));
+  ipcMain.handle('get-model-mode', () => getModelSettings());
 
   ipcMain.handle('set-model-mode', (_evt, { mode }) => ({ mode: setModelMode(mode) }));
 
-  ipcMain.handle('set-openai-api-key', (_evt, { token }) => setOpenAiApiKey(token));
+  ipcMain.handle('save-model-config', (_evt, config) => {
+    try {
+      return { ok: true, settings: setModelConfig(config) };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
 
-  ipcMain.handle('set-openai-model', (_evt, { model }) => ({ model: setOpenAiModel(model) }));
+  ipcMain.handle('set-provider-api-key', (_evt, { provider, token }) => {
+    try {
+      return setProviderApiKey(provider, token);
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('list-models', (_evt, options) => listAvailableModels(options));
 
   async function handleExtractText(imageDataUrl) {
     if (!imageDataUrl) {
@@ -1429,13 +1467,14 @@ function setupIpc() {
     }
     if (followUpCapturePending && panelWin && !panelWin.isDestroyed()) {
       followUpCapturePending = false;
-      panelWin.show();
-      panelWin.focus();
+      const targetPanel = panelWin;
+      targetPanel.show();
+      targetPanel.focus();
       setImmediate(() => {
-        if (!panelWin.isDestroyed()) {
+        if (panelWin === targetPanel && !targetPanel.isDestroyed()) {
           const len = typeof payload.imageDataUrl === 'string' ? payload.imageDataUrl.length : 0;
           log.info('main', 'Sending follow-up-capture to panel', { mime: payload.mime || 'image/png', dataUrlChars: len });
-          panelWin.webContents.send('follow-up-capture', {
+          targetPanel.webContents.send('follow-up-capture', {
             imageDataUrl: payload.imageDataUrl,
             mime: payload.mime || 'image/png'
           });
@@ -1454,14 +1493,7 @@ function setupIpc() {
 
   ipcMain.on('capture-cancel', () => {
     log.info('main', 'Capture cancelled', { followUpPending: followUpCapturePending });
-    destroyCaptureWindow();
-    if (followUpCapturePending) {
-      followUpCapturePending = false;
-      if (panelWin && !panelWin.isDestroyed()) {
-        panelWin.show();
-        panelWin.focus();
-      }
-    }
+    cancelCaptureFlow();
   });
 
   ipcMain.on('panel-close', () => {

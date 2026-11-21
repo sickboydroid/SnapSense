@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/hellofaizan/SnapSense/releases/latest">
+  <a href="https://github.com/sickboydroid/SnapSense/releases/latest">
     <img src="assets/icon.png" alt="SnapSense" width="160" height="160" />
   </a>
 </p>
@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://snapsense-tawny.vercel.app/">Website</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/hellofaizan/SnapSense/releases/latest">Download latest release</a>
+  <a href="https://github.com/sickboydroid/SnapSense/releases/latest">Download latest release</a>
 </p>
 
 ---
@@ -21,15 +21,15 @@
 ## Features
 
 - **Capture** — Global shortcut freezes the desktop and lets you drag a region to analyze.
-- **AI** — Send the capture to **Groq** for chat-style answers and follow-up questions.
-- **Text** — OCR-style extraction from the screenshot.
+- **AI** — Send the capture to **Groq**, **OpenAI**, or a compatible endpoint for answers and follow-up questions.
+- **Text** — AI-based text extraction from the screenshot.
 - **Lens** — Open or route captures toward Google Lens workflows.
 
 ## Requirements
 
 - **Windows** (x64), **Linux** (x86_64 AppImage), or **macOS** (Apple Silicon DMG) for running release builds.
-- **Node.js** 18+ for development and builds.
-- A **Groq API key** ([Groq Console](https://console.groq.com/)) for live AI (not needed for **Test** mode).
+- **Node.js** 20.19+ for development and builds.
+- A **Groq API key**, **OpenAI API key**, or a local OpenAI-compatible server with a vision-capable model for AI and Text modes.
 
 ### macOS (Apple Silicon DMG)
 
@@ -47,13 +47,7 @@
 ## Quick start (development)
 
 ```bash
-npm install
-```
-
-Create a `.env` file in the **project root** (same folder as `package.json`):
-
-```env
-GROQ_KEY=your_groq_api_key_here
+npm ci
 ```
 
 ```bash
@@ -62,61 +56,21 @@ npm run dev
 
 The app runs in the system tray / menu bar. Use the shortcut (**Win + Alt + S** on Windows, **⌘ + Option + S** on macOS) or the tray menu → **Capture region**.
 
+Open the model settings button beside the provider selector. Choose Groq, OpenAI, or Custom API. Enter a provider key and load its model list, or type a model ID directly. For a local server such as LM Studio, enter an OpenAI-compatible base URL such as `http://localhost:1234/v1` and choose a model that accepts images. Remote custom endpoints must use HTTPS. The model list may include text-only models; those cannot analyze screenshots.
+
 ---
 
-## Groq key: local vs packaged builds
+## Keys and model settings
 
-Release installers can **embed** a Groq key so users do not need their own key. That happens in `scripts/bake-key-for-dist.js`, which runs **before** every `dist:*` / `pack` command.
+Keys entered in the app are stored per provider using Electron `safeStorage` when OS encryption is available. The app does not include a shared API key in installers. For development, you can instead set `GROQ_KEY`, `OPENAI_API_KEY`, or `SNAPSENSE_CUSTOM_API_KEY` in the environment or a gitignored root `.env` file; a saved key takes precedence. Use the **Forget saved key** button to remove a saved key. A local custom endpoint may need no key.
 
-### Local builds (your machine)
-
-The bake script looks for the key in this order:
-
-1. **`GROQ_KEY` environment variable** (highest priority)
-2. **`GROQ_KEY=` in `.env`** in the project root
-
-If neither is set or the key is too short, the bake step exits with an error.
-
-Example using only the shell (no `.env`):
-
-```bash
-# Windows PowerShell
-$env:GROQ_KEY="gsk_..."; npm run dist:win:local
-
-# macOS / Linux
-GROQ_KEY="gsk_..." npm run dist:mac:local
-```
-
-`.env` is gitignored — do not commit it.
-
-### GitHub Actions (CI releases)
-
-The workflow **`.github/workflows/release.yml`** runs on **tag pushes** and passes the key into the build environment as:
-
-```yaml
-GROQ_KEY: ${{ secrets.GROQ_KEY }}
-```
-
-**You must create the secret in the GitHub UI** (the workflow cannot read your local `.env`):
-
-1. Open the repository on GitHub.
-2. **Settings** → **Secrets and variables** → **Actions**.
-3. **New repository secret**.
-4. **Name:** `GROQ_KEY` (exact spelling).
-5. **Value:** your Groq API key.
-6. Save.
-
-Then push a version tag (e.g. `v0.1.3`) or **re-run failed jobs** after adding the secret. If `GROQ_KEY` is missing, the log will show:
-
-`[bake-key-for-dist] GROQ_KEY not found. Set the GROQ_KEY env var (CI) or add it to .env (local).`
-
-`GITHUB_TOKEN` is provided automatically for **electron-builder** to upload installers to the release — you do not add it manually for standard builds.
+Model IDs and the custom base URL are saved in the app's user data directory. The provider's `/models` endpoint supplies the optional model list. Manual model IDs work when a provider does not offer a model list.
 
 ---
 
 ## Building installers
 
-All `dist` scripts run `bake-key-for-dist.js` first, then **electron-builder**.
+The `dist` scripts run **electron-builder**. They do not require an API key at build time.
 
 | Command | Output (under `dist/`) |
 |---------|------------------------|
@@ -150,13 +104,17 @@ The `frontend/` folder is a separate Vite + React landing page. See `frontend/pa
 | Path | Role |
 |------|------|
 | `src/main.js` | Electron main: tray, shortcuts, capture & panel windows |
+| `src/aiClient.js` | AI provider selection, settings, and requests |
 | `src/panel/` | Results UI (AI / text / Lens) |
 | `src/capture/` | Full-screen selection overlay |
-| `scripts/bake-key-for-dist.js` | Embeds `GROQ_KEY` into a generated file for packaged builds (gitignored) |
+| `config/` | Default AI prompts and settings packaged with the app |
+| `src/secureCredentials.js` | Saves provider keys through Electron `safeStorage` |
 | `scripts/prune-release-artifacts.js` | Post-build cleanup of `dist/` for releases |
 | `.github/workflows/release.yml` | Tagged release builds + publish |
 | `assets/` | Icons for the app and docs |
 | `frontend/` | Marketing website |
+
+For the process and window flow, see [Architecture](docs/ARCHITECTURE.md).
 
 ---
 

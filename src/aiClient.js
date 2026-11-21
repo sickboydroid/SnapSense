@@ -1,12 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
-const { getOpenAiApiKeySync } = require('./secureCredentials');
+const { getProviderApiKeySync } = require('./secureCredentials');
 
 const DUMMY_GROQ_KEY = 'groq-dummy-replace-with-your-key';
-const DEFAULT_GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
-const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
+const BASE_URLS = {
+  groq: 'https://api.groq.com/openai/v1',
+  openai: 'https://api.openai.com/v1'
+};
 const PROMPTS_PATH = path.join(__dirname, '..', 'config', 'ai-prompts.json');
 
 /**
@@ -28,21 +31,16 @@ function getSettingsPathFallback() {
   return path.join(__dirname, '..', 'config', 'ai-settings.json');
 }
 
-/** Populated only when `npm run dist` / `pack` runs `scripts/bake-key-for-dist.js` (file is gitignored). */
-function getBakedGroqKey() {
-  try {
-    return String(require('./baked-groq-key')).trim();
-  } catch {
-    return '';
-  }
-}
-
 function getGroqKey() {
+  const saved = getProviderApiKeySync('groq');
+  if (saved) return saved;
   const env = (process.env.GROQ_KEY || '').trim();
   if (env) return env;
-  const baked = getBakedGroqKey();
-  if (baked) return baked;
   return DUMMY_GROQ_KEY;
+}
+
+function hasUsableGroqKey(key) {
+  return Boolean(key && key.length >= 20 && key !== DUMMY_GROQ_KEY && !/^your[_-]/i.test(key));
 }
 
 function readJsonSafe(filePath, fallback) {
@@ -52,19 +50,6 @@ function readJsonSafe(filePath, fallback) {
     return JSON.parse(raw);
   } catch {
     return fallback;
-  }
-}
-
-function writeJsonSafe(filePath, value) {
-  try {
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  } catch (e) {
-    // Silently ignore write failures (e.g. read-only asar in production)
-    console.warn('[SnapSense aiClient] writeJsonSafe failed:', e?.message, filePath);
   }
 }
 
@@ -81,27 +66,28 @@ function readSettings() {
 }
 
 function writeSettings(settings) {
-  writeJsonSafe(getSettingsPath(), settings);
+  const filePath = getSettingsPath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
 }
 
 function getModelMode() {
   const settings = readSettings();
-  let m = settings.modelMode;
-  if (m === 'test') {
-    settings.modelMode = 'groq';
-    writeSettings(settings);
-    return 'groq';
-  }
-  if (m === 'openai') return 'openai';
+  if (settings.modelMode === 'openai' || settings.modelMode === 'custom') return settings.modelMode;
   return 'groq';
 }
 
 function setModelMode(mode) {
-  const normalized = mode === 'openai' ? 'openai' : 'groq';
+  if (!['groq', 'openai', 'custom'].includes(mode)) throw new Error('Unknown AI provider.');
   const settings = readSettings();
-  settings.modelMode = normalized;
+  settings.modelMode = mode;
   writeSettings(settings);
-  return normalized;
+  return mode;
+}
+
+function getGroqModel() {
+  const settings = readSettings();
+  return String(settings.groqModel || process.env.GROQ_MODEL || DEFAULT_GROQ_MODEL).trim();
 }
 
 function getOpenAiModel() {
@@ -112,13 +98,49 @@ function getOpenAiModel() {
   return env || DEFAULT_OPENAI_MODEL;
 }
 
-function setOpenAiModel(model) {
-  const trimmed = typeof model === 'string' ? model.trim() : '';
-  const value = trimmed || DEFAULT_OPENAI_MODEL;
+function getModelSettings() {
   const settings = readSettings();
-  settings.openaiModel = value;
+  return {
+    mode: getModelMode(),
+    models: {
+      groq: getGroqModel(),
+      openai: getOpenAiModel(),
+      custom: String(settings.customModel || '').trim()
+    },
+    customBaseUrl: String(settings.customBaseUrl || '').trim()
+  };
+}
+
+function normalizeCustomBaseUrl(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) throw new Error('Enter a base URL, such as http://localhost:1234/v1.');
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('Enter a valid base URL.');
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    throw new Error('Use HTTPS, or HTTP on localhost.');
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('The base URL cannot contain credentials, a query, or a fragment.');
+  }
+  return url.href.replace(/\/+$/, '');
+}
+
+function setModelConfig({ provider, model, baseUrl }) {
+  if (!['groq', 'openai', 'custom'].includes(provider)) throw new Error('Unknown AI provider.');
+  const id = typeof model === 'string' ? model.trim() : '';
+  if (!id || id.length > 200 || /[\x00-\x1f]/.test(id)) throw new Error('Enter a valid model ID.');
+  const settings = readSettings();
+  const field = { groq: 'groqModel', openai: 'openaiModel', custom: 'customModel' }[provider];
+  settings[field] = id;
+  if (provider === 'custom') settings.customBaseUrl = normalizeCustomBaseUrl(baseUrl);
+  settings.modelMode = provider;
   writeSettings(settings);
-  return value;
+  return getModelSettings();
 }
 
 function getStealthMode() {
@@ -135,15 +157,14 @@ function setStealthMode(enabled) {
 }
 
 function getOpenAiKey() {
+  const saved = getProviderApiKeySync('openai');
+  if (saved) return saved;
   const env = (process.env.OPENAI_API_KEY || '').trim();
-  if (env) return env;
-  return getOpenAiApiKeySync();
+  return env;
 }
 
-function getGroqModel() {
-  const configured = (process.env.GROQ_MODEL || '').trim();
-  if (configured) return configured;
-  return DEFAULT_GROQ_MODEL;
+function getCustomKey() {
+  return getProviderApiKeySync('custom') || (process.env.SNAPSENSE_CUSTOM_API_KEY || '').trim();
 }
 
 function getPrompt(name) {
@@ -160,6 +181,11 @@ function getPrompt(name) {
 
 function getAiKeyStatus() {
   const mode = getModelMode();
+  if (mode === 'custom') {
+    const settings = getModelSettings();
+    const configured = Boolean(settings.models.custom && settings.customBaseUrl);
+    return { configured, isDummy: !configured, provider: 'custom' };
+  }
   if (mode === 'openai') {
     const key = getOpenAiKey();
     const isDummy = !key || key.length < 20;
@@ -169,12 +195,47 @@ function getAiKeyStatus() {
       provider: 'openai'
     };
   }
-  return { configured: true, isDummy: false, provider: 'groq' };
+  const key = getGroqKey();
+  const isDummy = !hasUsableGroqKey(key);
+  return { configured: !isDummy, isDummy, provider: 'groq' };
+}
+
+async function listAvailableModels({ provider, baseUrl, apiKey } = {}) {
+  if (!['groq', 'openai', 'custom'].includes(provider)) return { error: 'Choose a provider.' };
+  let endpoint;
+  try {
+    endpoint = provider === 'custom'
+      ? normalizeCustomBaseUrl(baseUrl || getModelSettings().customBaseUrl)
+      : BASE_URLS[provider];
+  } catch (error) {
+    return { error: error.message };
+  }
+  const key = typeof apiKey === 'string' && apiKey.trim()
+    ? apiKey.trim()
+    : provider === 'groq' ? getGroqKey() : provider === 'openai' ? getOpenAiKey() : getCustomKey();
+  if (provider === 'groq' && !hasUsableGroqKey(key)) return { error: 'Add a Groq API key first.' };
+  if (provider === 'openai' && (!key || key.length < 20)) return { error: 'Add an OpenAI API key first.' };
+
+  try {
+    const response = await fetch(`${endpoint}/models`, {
+      headers: key ? { Authorization: `Bearer ${key}` } : {},
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!response.ok) return { error: `Could not load models (HTTP ${response.status}).` };
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) return { error: 'This endpoint did not return a model list.' };
+    const models = [...new Set(data.data.map((item) => item?.id).filter((id) =>
+      typeof id === 'string' && id.length > 0 && id.length <= 200
+    ))].sort((a, b) => a.localeCompare(b));
+    return { models };
+  } catch (error) {
+    return { error: error?.message || 'Could not load models.' };
+  }
 }
 
 async function requestGroq(messages, maxTokens = 4096, logger = null) {
   const apiKey = getGroqKey();
-  if (!apiKey || apiKey === DUMMY_GROQ_KEY) {
+  if (!hasUsableGroqKey(apiKey)) {
     return {
       error: 'Groq API key is not configured.'
     };
@@ -200,7 +261,8 @@ async function requestGroq(messages, maxTokens = 4096, logger = null) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000)
     });
   } catch (e) {
     if (logger?.error) {
@@ -240,17 +302,26 @@ async function requestGroq(messages, maxTokens = 4096, logger = null) {
   return { content };
 }
 
-async function requestOpenAi(messages, maxTokens = 4096, logger = null) {
-  const apiKey = getOpenAiKey();
-  if (!apiKey || apiKey.length < 20) {
+async function requestOpenAi(messages, maxTokens = 4096, logger = null, custom = false) {
+  const apiKey = custom ? getCustomKey() : getOpenAiKey();
+  if (!custom && (!apiKey || apiKey.length < 20)) {
     return { error: 'OpenAI API key is not configured.' };
   }
-  const model = getOpenAiModel();
+  const settings = custom ? getModelSettings() : null;
+  const model = custom ? settings.models.custom : getOpenAiModel();
+  let baseUrl;
+  try {
+    baseUrl = custom ? normalizeCustomBaseUrl(settings.customBaseUrl) : BASE_URLS.openai;
+  } catch (error) {
+    return { error: error.message };
+  }
+  if (!model) return { error: 'Choose a model ID first.' };
+  const provider = custom ? 'Custom API' : 'OpenAI';
   if (logger?.debug) {
     const userMessageCount = Array.isArray(messages)
       ? messages.filter((m) => m && m.role === 'user').length
       : 0;
-    logger.debug('aiClient', 'OpenAI request', { userMessageCount, model });
+    logger.debug('aiClient', `${provider} request`, { userMessageCount, model });
   }
 
   const body = {
@@ -260,17 +331,18 @@ async function requestOpenAi(messages, maxTokens = 4096, logger = null) {
   };
   let res;
   try {
-    res = await fetch(OPENAI_CHAT_URL, {
+    res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000)
     });
   } catch (e) {
     if (logger?.error) {
-      logger.error('aiClient', 'OpenAI fetch failed', { message: e.message, model });
+      logger.error('aiClient', `${provider} fetch failed`, { message: e.message, model });
     }
     return { error: e.message || 'Network error - check your connection.' };
   }
@@ -278,13 +350,13 @@ async function requestOpenAi(messages, maxTokens = 4096, logger = null) {
   const text = await res.text();
   if (!res.ok) {
     if (logger?.error) {
-      logger.error('aiClient', 'OpenAI HTTP error', {
+      logger.error('aiClient', `${provider} HTTP error`, {
         status: res.status,
         body: text.slice(0, 500),
         model
       });
     }
-    return { error: `OpenAI error ${res.status}: ${text.slice(0, 240)}` };
+    return { error: `${provider} error ${res.status}: ${text.slice(0, 240)}` };
   }
 
   let data;
@@ -292,26 +364,29 @@ async function requestOpenAi(messages, maxTokens = 4096, logger = null) {
     data = JSON.parse(text);
   } catch (e) {
     if (logger?.error) {
-      logger.error('aiClient', 'OpenAI parse error', e);
+      logger.error('aiClient', `${provider} parse error`, e);
     }
-    return { error: 'Invalid response from OpenAI.' };
+    return { error: `Invalid response from ${provider}.` };
   }
   const content = data?.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || !content.trim()) {
     if (logger?.error) {
-      logger.error('aiClient', 'OpenAI unexpected shape', data);
+      logger.error('aiClient', `${provider} unexpected shape`, data);
     }
-    return { error: 'Unexpected OpenAI response.' };
+    return { error: `Unexpected ${provider} response.` };
   }
 
   if (logger?.info) {
-    logger.info('aiClient', 'Model resolved', { model, provider: 'openai' });
+    logger.info('aiClient', 'Model resolved', { model, provider: custom ? 'custom' : 'openai' });
   }
   return { content };
 }
 
 async function requestAi(messages, maxTokens = 4096, logger = null) {
   const modelMode = getModelMode();
+  if (modelMode === 'custom') {
+    return requestOpenAi(messages, maxTokens, logger, true);
+  }
   if (modelMode === 'openai') {
     return requestOpenAi(messages, maxTokens, logger);
   }
@@ -323,7 +398,9 @@ module.exports = {
   getModelMode,
   setModelMode,
   getOpenAiModel,
-  setOpenAiModel,
+  getModelSettings,
+  setModelConfig,
+  listAvailableModels,
   getStealthMode,
   setStealthMode,
   getPrompt,

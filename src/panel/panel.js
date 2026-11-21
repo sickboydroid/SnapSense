@@ -20,16 +20,25 @@ const textCopyBtn = document.getElementById('text-copy');
 const textLoadingEl = document.getElementById('text-loading');
 const textResultEl = document.getElementById('text-result');
 const textErrorEl = document.getElementById('text-error');
+const textRetryBtn = document.getElementById('text-retry');
 const lensWebview = document.getElementById('lens-view');
 const lensOpenExternalBtn = document.getElementById('lens-open-browser');
 const lensLoadingEl = document.getElementById('lens-loading');
 const lensErrorEl = document.getElementById('lens-error');
 const modelModeSelect = document.getElementById('ai-model-mode');
 const modelSelectWrap = document.querySelector('.model-select-wrap');
-const openaiKeyBar = document.getElementById('openai-key-bar');
-const openaiApiKeyInput = document.getElementById('openai-api-key');
-const openaiModelIdInput = document.getElementById('openai-model-id');
-const openaiKeySaveBtn = document.getElementById('openai-key-save');
+const modelSettingsToggle = document.getElementById('model-settings-toggle');
+const modelSettingsEl = document.getElementById('model-settings');
+const modelCatalogEl = document.getElementById('model-catalog');
+const modelListLoadBtn = document.getElementById('model-list-load');
+const modelIdInput = document.getElementById('model-id');
+const customBaseUrlField = document.getElementById('custom-base-url-field');
+const customBaseUrlInput = document.getElementById('custom-base-url');
+const providerKeyLabel = document.getElementById('provider-key-label');
+const providerApiKeyInput = document.getElementById('provider-api-key');
+const modelSettingsSaveBtn = document.getElementById('model-settings-save');
+const modelKeyClearBtn = document.getElementById('model-key-clear');
+const modelSettingsStatus = document.getElementById('model-settings-status');
 const voiceToggleBtn = document.getElementById('voice-toggle');
 const stealthToggleBtn = document.getElementById('stealth-toggle');
 const followUpPreviewEl = document.getElementById('follow-up-preview');
@@ -43,6 +52,7 @@ let messages = [];
 let busy = false;
 let activeLensUrl = 'https://lens.google.com/';
 let aiLoadingEl = null;
+let modelSettingsOpen = false;
 /** Until first real http(s) page finishes loading after assigning Lens URL */
 let lensSessionPending = false;
 /** While main process is uploading — ignore webview load events from the previous page. */
@@ -259,11 +269,26 @@ function streamMarkdownReveal(el, fullText, cps, scrollEl) {
       resolve();
       return;
     }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.innerHTML = renderMarkdown(text);
+      if (scrollEl === chatEl) syncChatJumpButton();
+      resolve();
+      return;
+    }
+
+    const durationMs = Math.min((text.length / cps) * 1000, 2500);
     const t0 = performance.now();
+    let lastFrame = 0;
     function tick(now) {
-      const n = Math.min(text.length, Math.floor(((now - t0) / 1000) * cps));
+      if (now - lastFrame < 40 && now - t0 < durationMs) {
+        requestAnimationFrame(tick);
+        return;
+      }
+      lastFrame = now;
+      const n = Math.min(text.length, Math.floor(((now - t0) / durationMs) * text.length));
+      const pinned = scrollEl && isChatNearBottom(scrollEl);
       el.innerHTML = renderMarkdown(text.slice(0, n));
-      if (scrollEl && isChatNearBottom(scrollEl)) {
+      if (pinned) {
         scrollEl.scrollTop = scrollEl.scrollHeight;
       }
       if (scrollEl === chatEl) {
@@ -395,11 +420,34 @@ function setTyping(on) {
   typingEl.hidden = !on;
 }
 
-function updateOpenAiBarVisibility() {
-  if (!openaiKeyBar || !appWrap) return;
-  const aiMode = appWrap.dataset.mode === 'ai';
-  const openai = modelModeSelect && modelModeSelect.value === 'openai';
-  openaiKeyBar.hidden = !(aiMode && openai);
+function updateModelSettingsVisibility() {
+  if (!modelSettingsEl || !appWrap) return;
+  const usesAi = appWrap.dataset.mode !== 'lens';
+  modelSettingsEl.hidden = !(usesAi && modelSettingsOpen);
+  modelSettingsToggle.hidden = !usesAi;
+  modelSettingsToggle.setAttribute('aria-expanded', String(usesAi && modelSettingsOpen));
+}
+
+function setModelSettingsOpen(open) {
+  modelSettingsOpen = Boolean(open);
+  updateModelSettingsVisibility();
+}
+
+function setModelSettingsStatus(message, error = false) {
+  modelSettingsStatus.textContent = message;
+  modelSettingsStatus.classList.toggle('error', error);
+}
+
+function renderModelSettings(settings) {
+  const provider = modelModeSelect.value;
+  modelIdInput.value = settings?.models?.[provider] || '';
+  customBaseUrlInput.value = settings?.customBaseUrl || '';
+  customBaseUrlField.hidden = provider !== 'custom';
+  providerKeyLabel.textContent = provider === 'custom'
+    ? 'API key (optional)'
+    : `${provider === 'groq' ? 'Groq' : 'OpenAI'} API key`;
+  providerApiKeyInput.value = '';
+  modelCatalogEl.replaceChildren(new Option('Load models from this provider', ''));
 }
 
 async function syncModelSelectFromMain() {
@@ -407,13 +455,11 @@ async function syncModelSelectFromMain() {
   try {
     const r = await window.snapsense.getModelMode();
     const mode = r?.mode || 'groq';
-    if (mode === 'groq' || mode === 'openai') {
+    if (mode === 'groq' || mode === 'openai' || mode === 'custom') {
       modelModeSelect.value = mode;
     }
-    if (openaiModelIdInput && typeof r?.openaiModel === 'string') {
-      openaiModelIdInput.value = r.openaiModel;
-    }
-    updateOpenAiBarVisibility();
+    renderModelSettings(r);
+    updateModelSettingsVisibility();
   } catch {
     /* ignore */
   }
@@ -423,13 +469,11 @@ async function refreshApiBanner() {
   try {
     const r = await window.snapsense.getModelMode();
     const mode = r?.mode || 'groq';
-    if (mode !== 'openai') {
-      bannerEl.classList.remove('visible');
-      return;
-    }
     const s = await window.snapsense.getApiKeyStatus();
     if (s.isDummy || !s.configured) {
-      bannerEl.textContent = 'OpenAI API key is missing or invalid.';
+      bannerEl.textContent = mode === 'custom'
+        ? 'Set a custom base URL and model ID.'
+        : `${mode === 'openai' ? 'OpenAI' : 'Groq'} API key is missing or invalid.`;
       bannerEl.classList.add('visible');
     } else {
       bannerEl.classList.remove('visible');
@@ -464,6 +508,7 @@ function scrollTextChat() {
 }
 
 async function runTextExtractFlow() {
+  textRetryBtn.hidden = true;
   if (textResultEl) textResultEl.hidden = true;
   if (textErrorEl) {
     textErrorEl.hidden = true;
@@ -503,6 +548,7 @@ async function runTextExtractFlow() {
       textErrorEl.hidden = false;
       textErrorEl.textContent = e?.message || 'Could not extract text.';
     }
+    textRetryBtn.hidden = false;
   }
 }
 
@@ -646,12 +692,12 @@ function applyMode(mode) {
   }
   bannerEl.hidden = m !== 'ai';
   if (modelSelectWrap) {
-    modelSelectWrap.hidden = m !== 'ai';
+    modelSelectWrap.hidden = m === 'lens';
   }
   if (m !== 'ai') {
     bannerEl.classList.remove('visible');
   }
-  updateOpenAiBarVisibility();
+  updateModelSettingsVisibility();
   return m;
 }
 
@@ -662,6 +708,7 @@ function onOpen(payload) {
   shotText.src = imageDataUrl;
 
   if (mode === 'text') {
+    syncModelSelectFromMain();
     runTextExtractFlow();
     bannerEl.classList.remove('visible');
     return;
@@ -726,7 +773,8 @@ msgEl.addEventListener('keydown', (e) => {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     e.preventDefault();
-    window.snapsense.closePanel();
+    if (modelSettingsOpen) setModelSettingsOpen(false);
+    else window.snapsense.closePanel();
   }
 });
 btnClose.addEventListener('click', () => window.snapsense.closePanel());
@@ -820,49 +868,97 @@ lensWebview.addEventListener('did-fail-load', (e) => {
 
 if (modelModeSelect) {
   modelModeSelect.addEventListener('change', async () => {
-    const v = modelModeSelect.value;
+    const provider = modelModeSelect.value;
     try {
-      await window.snapsense.setModelMode(v);
-      updateOpenAiBarVisibility();
-      if (v === 'openai') {
-        try {
-          const r = await window.snapsense.getModelMode();
-          if (openaiModelIdInput && typeof r?.openaiModel === 'string') {
-            openaiModelIdInput.value = r.openaiModel;
-          }
-        } catch {
-          /* ignore */
-        }
-      }
+      await window.snapsense.setModelMode(provider);
+      await syncModelSelectFromMain();
+      if (provider === 'custom') setModelSettingsOpen(true);
+      setModelSettingsStatus('Choose a model from the list or enter its ID.');
       await refreshApiBanner();
     } catch (e) {
       console.error('[SnapSense panel] setModelMode', e);
+      setModelSettingsStatus(e?.message || 'Could not switch provider.', true);
     }
   });
 }
 
-if (openaiKeySaveBtn && openaiApiKeyInput) {
-  openaiKeySaveBtn.addEventListener('click', async () => {
-    try {
-      if (openaiModelIdInput) {
-        await window.snapsense.setOpenAiModel(openaiModelIdInput.value);
-      }
-      const typed = (openaiApiKeyInput.value || '').trim();
-      if (typed.length) {
-        const r = await window.snapsense.setOpenAiApiKey(typed);
-        if (r && r.ok === false && r.error) {
-          throw new Error(r.error);
-        }
-        openaiApiKeyInput.value = '';
-      }
-      await refreshApiBanner();
-    } catch (e) {
-      console.error('[SnapSense panel] save OpenAI key', e);
-      bannerEl.textContent = e?.message || 'Could not save API key.';
-      bannerEl.classList.add('visible');
+modelSettingsToggle.addEventListener('click', () => {
+  setModelSettingsOpen(!modelSettingsOpen);
+});
+
+modelCatalogEl.addEventListener('change', () => {
+  if (modelCatalogEl.value) modelIdInput.value = modelCatalogEl.value;
+});
+
+modelListLoadBtn.addEventListener('click', async () => {
+  const provider = modelModeSelect.value;
+  modelListLoadBtn.disabled = true;
+  setModelSettingsStatus('Loading available models…');
+  try {
+    const result = await window.snapsense.listModels({
+      provider,
+      baseUrl: customBaseUrlInput.value,
+      apiKey: providerApiKeyInput.value
+    });
+    if (provider !== modelModeSelect.value) return;
+    if (result?.error) throw new Error(result.error);
+    const models = result?.models || [];
+    modelCatalogEl.replaceChildren(new Option('Choose a model', ''));
+    for (const id of models) modelCatalogEl.add(new Option(id, id));
+    modelCatalogEl.value = models.includes(modelIdInput.value) ? modelIdInput.value : '';
+    setModelSettingsStatus(models.length
+      ? `Loaded ${models.length} models. Choose one that accepts images.`
+      : 'No models were returned. You can still enter a model ID manually.');
+  } catch (error) {
+    setModelSettingsStatus(error?.message || 'Could not load models.', true);
+  } finally {
+    modelListLoadBtn.disabled = false;
+  }
+});
+
+modelSettingsSaveBtn.addEventListener('click', async () => {
+  const provider = modelModeSelect.value;
+  modelSettingsSaveBtn.disabled = true;
+  setModelSettingsStatus('Saving model…');
+  try {
+    const result = await window.snapsense.saveModelConfig({
+      provider,
+      model: modelIdInput.value,
+      baseUrl: customBaseUrlInput.value
+    });
+    if (!result?.ok) throw new Error(result?.error || 'Could not save model.');
+    const key = providerApiKeyInput.value.trim();
+    if (key) {
+      const saved = await window.snapsense.setProviderApiKey(provider, key);
+      if (!saved?.ok) throw new Error(saved?.error || 'Could not save API key.');
+      providerApiKeyInput.value = '';
     }
-  });
-}
+    await refreshApiBanner();
+    setModelSettingsStatus('Model settings saved. New requests will use this model.');
+    if (appWrap.dataset.mode === 'text' && !textRetryBtn.hidden) runTextExtractFlow();
+  } catch (error) {
+    setModelSettingsStatus(error?.message || 'Could not save model settings.', true);
+  } finally {
+    modelSettingsSaveBtn.disabled = false;
+  }
+});
+
+textRetryBtn.addEventListener('click', runTextExtractFlow);
+
+modelKeyClearBtn.addEventListener('click', async () => {
+  modelKeyClearBtn.disabled = true;
+  try {
+    const result = await window.snapsense.setProviderApiKey(modelModeSelect.value, '');
+    if (!result?.ok) throw new Error(result?.error || 'Could not forget the key.');
+    providerApiKeyInput.value = '';
+    await refreshApiBanner();
+    setModelSettingsStatus('Saved key removed. An environment key may still be used.');
+  } catch (error) {
+    setModelSettingsStatus(error?.message || 'Could not forget the key.', true);
+  } finally {
+    modelKeyClearBtn.disabled = false;
+  }
+});
 
 const off = window.snapsense.onPanelOpen((payload) => onOpen(payload));
 const offFollowUp =

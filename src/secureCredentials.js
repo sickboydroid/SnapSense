@@ -2,19 +2,26 @@ const { app, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-const FILE_NAME = 'openai-api.token';
+const TOKEN_FILES = {
+  openai: 'openai-api.token',
+  groq: 'groq-api.token',
+  custom: 'custom-api.token'
+};
 
-function tokenFilePath() {
-  return path.join(app.getPath('userData'), FILE_NAME);
+function tokenFilePath(provider) {
+  const name = TOKEN_FILES[provider];
+  if (!name) throw new Error('Unknown AI provider.');
+  return path.join(app.getPath('userData'), name);
 }
 
 /**
- * Persists the OpenAI API key using the OS secret store (DPAPI on Windows via Chromium safeStorage).
+ * Persists a provider key using the OS secret store through Electron safeStorage.
  */
-function setOpenAiApiKey(plain) {
+function setProviderApiKey(provider, plain) {
+  const filePath = tokenFilePath(provider);
   const trimmed = typeof plain === 'string' ? plain.trim() : '';
   if (!trimmed) {
-    clearOpenAiApiKey();
+    clearProviderApiKey(provider);
     return { ok: true, cleared: true };
   }
   if (!safeStorage.isEncryptionAvailable()) {
@@ -25,19 +32,20 @@ function setOpenAiApiKey(plain) {
   }
   try {
     const encrypted = safeStorage.encryptString(trimmed);
-    const dir = path.dirname(tokenFilePath());
+    const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(tokenFilePath(), encrypted);
+    fs.writeFileSync(filePath, encrypted, { mode: 0o600 });
+    fs.chmodSync(filePath, 0o600);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message || 'Could not save API key.' };
   }
 }
 
-function getOpenAiApiKeySync() {
-  const p = tokenFilePath();
+function getProviderApiKeySync(provider) {
+  const p = tokenFilePath(provider);
   if (!fs.existsSync(p)) {
     return '';
   }
@@ -52,19 +60,17 @@ function getOpenAiApiKeySync() {
   }
 }
 
-function clearOpenAiApiKey() {
-  const p = tokenFilePath();
+function clearProviderApiKey(provider) {
+  const p = tokenFilePath(provider);
   if (fs.existsSync(p)) {
-    try {
-      fs.unlinkSync(p);
-    } catch {
-      /* ignore */
-    }
+    fs.unlinkSync(p);
   }
 }
 
 module.exports = {
-  setOpenAiApiKey,
-  getOpenAiApiKeySync,
-  clearOpenAiApiKey
+  setProviderApiKey,
+  getProviderApiKeySync,
+  clearProviderApiKey,
+  setOpenAiApiKey: (plain) => setProviderApiKey('openai', plain),
+  getOpenAiApiKeySync: () => getProviderApiKeySync('openai')
 };
