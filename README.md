@@ -54,7 +54,9 @@ npm ci
 npm run dev
 ```
 
-The app runs in the system tray / menu bar. Use the shortcut (**Win + Alt + S** on Windows, **⌘ + Option + S** on macOS) or the tray menu → **Capture region**.
+On Windows and macOS, the app runs in the system tray / menu bar. Use the shortcut (**Win + Alt + S** on Windows, **⌘ + Option + S** on macOS) or the tray menu → **Capture region**.
+
+On Linux, SnapSense opens a small launcher with a **Capture region** button, because GNOME does not always show tray icons. On X11 the shortcut is **Ctrl + Alt + S**. On GNOME Wayland, open **Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts**, add the command shown in the SnapSense launcher, and bind it to **Ctrl + Alt + S**. The command ends with `--capture`, so it works whether SnapSense is already running or not. GNOME normally reserves **Super + Alt + S** for its screen reader. When you move or replace the AppImage, update the custom shortcut's command to its new path.
 
 Open the model settings button beside the provider selector. Choose Groq, OpenAI, or Custom API. Enter a provider key and load its model list, or type a model ID directly. For a local server such as LM Studio, enter an OpenAI-compatible base URL such as `http://localhost:1234/v1` and choose a model that accepts images. Remote custom endpoints must use HTTPS. The model list may include text-only models; those cannot analyze screenshots.
 

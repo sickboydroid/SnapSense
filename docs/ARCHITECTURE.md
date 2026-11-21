@@ -6,6 +6,8 @@ SnapSense has an Electron desktop app and a separate React landing page in `fron
 
 `src/main.js` owns the tray, global shortcut, window lifecycle, desktop source selection, API calls, and external links. `src/preload.js` exposes the IPC methods used by the renderer pages. The pages have context isolation enabled and no direct Node integration.
 
+On Linux, `src/launcher/` provides a visible Capture button when a desktop does not display tray icons. A second invocation with `--capture` sends the request to the running instance through Electron's single-instance lock; GNOME Wayland can bind that command in its keyboard settings. The launcher is hidden before the screenshot frame is frozen and shown again after cancellation or closing the result panel.
+
 The normal capture path is:
 
 1. The shortcut or tray action starts a capture flow and closes any existing result panel.

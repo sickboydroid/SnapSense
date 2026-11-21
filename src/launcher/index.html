@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SnapSense</title>
+    <link rel="stylesheet" href="../shared/app-chrome.css" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="launcher">
+      <div class="brand"><img src="../../assets/icons/app-mark.svg" alt="" width="34" height="34" /><span>SnapSense</span></div>
+      <h1>Understand any part of your screen.</h1>
+      <p>Choose a region to ask AI, extract text, or open it in Lens.</p>
+      <button id="capture" class="capture" type="button">Capture region</button>
+      <section id="shortcut-help" hidden>
+        <h2>Set up a Fedora shortcut</h2>
+        <p>In Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts, add this command and choose <strong>Ctrl + Alt + S</strong>:</p>
+        <div class="command-row"><code id="capture-command"></code><button id="copy-command" type="button">Copy</button></div>
+        <p class="note">GNOME uses Super + Alt + S for its screen reader.</p>
+      </section>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script src="launcher.js"></script>
+  </body>
+</html>

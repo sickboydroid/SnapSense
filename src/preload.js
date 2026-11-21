@@ -1,6 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('snapsense', {
+  startCapture: () => ipcRenderer.send('launcher-capture'),
+  quitApp: () => ipcRenderer.send('launcher-quit'),
+  getLauncherInfo: () => ipcRenderer.invoke('launcher-info'),
+  copyCaptureCommand: () => ipcRenderer.send('launcher-copy-command'),
+  onLauncherStatus: (fn) => {
+    const handler = (_, message) => fn(message);
+    ipcRenderer.on('launcher-status', handler);
+    return () => ipcRenderer.removeListener('launcher-status', handler);
+  },
   onCaptureInit: (fn) => {
     const handler = (_, payload) => fn(payload);
     ipcRenderer.on('capture-init', handler);

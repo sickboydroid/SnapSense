@@ -1,6 +1,6 @@
 {
   "name": "snapsense",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "SnapSense — tray screenshot + AI overlay",
   "author": "SnapSense",
   "main": "src/main.js",

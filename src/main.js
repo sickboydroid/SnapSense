@@ -36,6 +36,11 @@ const PANEL_PRELOAD = path.join(__dirname, 'preload.js');
 const CAPTURE_HTML = path.join(__dirname, 'capture', 'index.html');
 const PANEL_HTML = path.join(__dirname, 'panel', 'index.html');
 const MODE_STRIP_HTML = path.join(__dirname, 'mode-strip', 'index.html');
+const LAUNCHER_HTML = path.join(__dirname, 'launcher', 'index.html');
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+let captureRequestedAtLaunch = process.argv.includes('--capture');
+if (!hasSingleInstanceLock) app.quit();
 
 function loadEnvFile() {
   try {
@@ -113,6 +118,7 @@ let tray = null;
 let captureWin = null;
 let modeStripWin = null;
 let panelWin = null;
+let launcherWin = null;
 let captureFrameReady = false;
 let modeStripReady = false;
 /** Whether stealth mode is currently active. */
@@ -800,7 +806,52 @@ function cancelCaptureFlow() {
   if (restorePanel && panelWin && !panelWin.isDestroyed()) {
     panelWin.show();
     panelWin.focus();
+  } else {
+    showLauncherWindow();
   }
+}
+
+function showLauncherWindow(message = '') {
+  if (!launcherWin || launcherWin.isDestroyed()) return;
+  launcherWin.show();
+  launcherWin.focus();
+  if (message) launcherWin.webContents.send('launcher-status', message);
+}
+
+function getCaptureCommand() {
+  const executable = process.env.APPIMAGE || (app.isPackaged ? app.getPath('exe') : '');
+  if (!executable) return '';
+  return `'${executable.replace(/'/g, "'\\''")}' --capture`;
+}
+
+function createLauncherWindow(showOnReady = true) {
+  if (process.platform !== 'linux' || (launcherWin && !launcherWin.isDestroyed())) return;
+  const icon = appIconPath();
+  const win = new BrowserWindow({
+    width: 430,
+    height: 470,
+    minWidth: 390,
+    minHeight: 400,
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#0a0a0a',
+    ...(fs.existsSync(icon) ? { icon } : {}),
+    webPreferences: {
+      preload: PANEL_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  launcherWin = win;
+  win.loadFile(LAUNCHER_HTML).catch((error) => log.error('main', 'loadFile launcher', error));
+  win.once('ready-to-show', () => {
+    if (showOnReady && launcherWin === win && !win.isDestroyed()) win.show();
+  });
+  win.on('closed', () => {
+    if (launcherWin === win) launcherWin = null;
+    if (!captureWin && !panelWin) app.quit();
+  });
 }
 
 function createModeStripWindow() {
@@ -1043,7 +1094,10 @@ function createPanelWindow(payload) {
   });
 
   win.on('closed', () => {
-    if (panelWin === win) panelWin = null;
+    if (panelWin === win) {
+      panelWin = null;
+      if (!captureWin) showLauncherWindow();
+    }
   });
 
   // Restore persisted stealth preference on each new panel window.
@@ -1141,13 +1195,18 @@ async function startCaptureFlow() {
     }
     if (!sourceId) {
       log.warn('main', 'Abort capture: no source');
+      showLauncherWindow('Could not read the screen. Check the screen-sharing permission and try again.');
       return;
+    }
+    if (launcherWin && !launcherWin.isDestroyed() && launcherWin.isVisible()) {
+      await hideWindowForCapture(launcherWin);
     }
     createCaptureWindow(sourceId);
   } catch (e) {
     log.error('main', 'Capture flow failed', { message: e.message, gen });
     if (gen === captureFlowGeneration) {
       destroyCaptureWindow();
+      showLauncherWindow('Capture could not start. Please try again.');
     }
   }
 }
@@ -1160,16 +1219,21 @@ function getCaptureAcceleratorCandidates() {
   if (process.platform === 'darwin') {
     return ['Command+Alt+S', 'Control+Alt+S', 'Super+Alt+S'];
   }
-  return ['Super+Alt+S'];
+  return process.platform === 'linux' ? ['Control+Alt+S'] : ['Super+Alt+S'];
 }
 
 function captureShortcutHint() {
   if (process.platform === 'darwin') return '⌘⌥S';
   if (process.platform === 'win32') return 'Win+Alt+S';
-  return 'Super+Alt+S';
+  return 'Ctrl+Alt+S';
 }
 
 function registerShortcut() {
+  if (process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland') {
+    log.info('main', 'Wayland shortcut is configured through desktop keyboard settings');
+    if (tray && !tray.isDestroyed()) tray.setToolTip('SnapSense — open the app to capture');
+    return;
+  }
   registeredCaptureAccelerator = null;
   const candidates = getCaptureAcceleratorCandidates();
   for (const accel of candidates) {
@@ -1277,6 +1341,17 @@ function buildTray() {
 }
 
 function setupIpc() {
+  ipcMain.on('launcher-capture', () => startCaptureFlow());
+  ipcMain.on('launcher-quit', () => app.quit());
+  ipcMain.handle('launcher-info', () => ({
+    captureCommand: getCaptureCommand(),
+    wayland: process.env.XDG_SESSION_TYPE === 'wayland'
+  }));
+  ipcMain.on('launcher-copy-command', (event) => {
+    const command = getCaptureCommand();
+    if (command) clipboard.writeText(command);
+    event.reply('launcher-status', command ? 'Capture command copied.' : 'Build the app to get a capture command.');
+  });
   ipcMain.on('capture-ready', (event) => {
     if (!captureWin || captureWin.isDestroyed() || event.sender !== captureWin.webContents) return;
     captureFrameReady = true;
@@ -1509,6 +1584,16 @@ function setupIpc() {
   });
 }
 
+if (hasSingleInstanceLock) {
+  app.on('second-instance', (_event, argv) => {
+    if (argv.includes('--capture')) {
+      if (app.isReady()) startCaptureFlow();
+      else captureRequestedAtLaunch = true;
+    } else {
+      showLauncherWindow();
+    }
+  });
+
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     if (permission === 'media' || permission === 'display-capture') {
@@ -1521,12 +1606,20 @@ app.whenReady().then(() => {
   logMissingUiAssets();
   requestMacAccessibilityTrust();
   setupIpc();
-  buildTray();
+  try {
+    buildTray();
+  } catch (error) {
+    log.warn('main', 'Tray unavailable', { message: error?.message });
+  }
+  createLauncherWindow(!captureRequestedAtLaunch);
+  app.on('activate', () => showLauncherWindow());
   registerShortcut();
+  if (captureRequestedAtLaunch) setImmediate(() => startCaptureFlow());
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
   });
 });
+}
 
 /** Tray app: keep running when capture/panel windows close */
 app.on('window-all-closed', () => {});
